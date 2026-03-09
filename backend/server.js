@@ -1,9 +1,12 @@
+const cors = require("cors");
+
 const express = require("express");
 const mongoose = require("mongoose");
 const TShirt = require("./models/TShirt");
 
 const app = express();
 
+app.use(cors());
 app.use(express.json());
 
 mongoose.connect("mongodb://admin:123456@localhost:27017")
