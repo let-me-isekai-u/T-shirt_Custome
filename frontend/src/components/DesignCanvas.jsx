@@ -34,11 +34,13 @@ export const FONT_OPTIONS = [
 ];
 
 function getDefaultPrintArea(box) {
+  // The shirt body (torso) starts at ~28% and ends at ~86% of box height.
+  // Using y = 30% gives a comfortable margin above the chest area.
   const w = box.w * 0.46;
-  const h = box.h * 0.56;
+  const h = box.h * 0.50;
   return {
     x: box.x + (box.w - w) / 2,
-    y: box.y + box.h * 0.22,
+    y: box.y + box.h * 0.30,
     w,
     h,
   };
@@ -183,7 +185,18 @@ const DesignCanvas = forwardRef(function DesignCanvas(
   const clipRef = useRef(null);
   const printGuideRef = useRef(null);
   const shirtRef = useRef(null);
+  // Keep initial shirt color in a ref so canvas isn't rebuilt when color changes.
+  // The separate shirtColor effect below handles live color updates.
+  const shirtColorRef = useRef(shirtColor);
+  // Store callbacks in refs so the canvas init effect doesn't re-run
+  // every time the parent re-renders and creates new callback references.
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const onChangeTransformRef = useRef(onChangeTransform);
   const [canvasReady, setCanvasReady] = useState(false);
+
+  // Update callback refs on every render to stay in sync with the latest props.
+  onSelectionChangeRef.current = onSelectionChange;
+  onChangeTransformRef.current = onChangeTransform;
 
   useImperativeHandle(ref, () => ({
     addText({ text, fontFamily, fontSize, fill }) {
@@ -263,13 +276,15 @@ const DesignCanvas = forwardRef(function DesignCanvas(
     fabricRef.current = canvas;
     setCanvasReady(true);
 
-    const { group: shirtGroup, shirt } = buildShirtGroup(shirtBox, shirtColor);
+    const { group: shirtGroup, shirt } = buildShirtGroup(shirtBox, shirtColorRef.current);
     shirtRef.current = shirt;
     canvas.add(shirtGroup);
 
     const printGuide = new Rect({
       left: printArea.x,
       top: printArea.y,
+      originX: "left",
+      originY: "top",
       width: printArea.w,
       height: printArea.h,
       fill: "",
@@ -288,6 +303,8 @@ const DesignCanvas = forwardRef(function DesignCanvas(
     const clipRect = new Rect({
       left: printArea.x,
       top: printArea.y,
+      originX: "left",
+      originY: "top",
       width: printArea.w,
       height: printArea.h,
       absolutePositioned: true,
@@ -297,13 +314,13 @@ const DesignCanvas = forwardRef(function DesignCanvas(
 
     const emitSelection = () => {
       const active = canvas.getActiveObject();
-      if (!onSelectionChange) return;
+      if (!onSelectionChangeRef.current) return;
       if (!active) {
-        onSelectionChange({ type: "none" });
+        onSelectionChangeRef.current({ type: "none" });
         return;
       }
       if (active.type === "i-text" || active.type === "textbox" || active.type === "text") {
-        onSelectionChange({
+        onSelectionChangeRef.current({
           type: "text",
           fontFamily: active.fontFamily || "Poppins",
           fontSize: Math.round(active.fontSize || 36),
@@ -312,10 +329,10 @@ const DesignCanvas = forwardRef(function DesignCanvas(
         return;
       }
       if (active.type === "image") {
-        onSelectionChange({ type: "image" });
+        onSelectionChangeRef.current({ type: "image" });
         return;
       }
-      onSelectionChange({ type: "other" });
+      onSelectionChangeRef.current({ type: "other" });
     };
 
     canvas.on("selection:created", emitSelection);
@@ -323,9 +340,9 @@ const DesignCanvas = forwardRef(function DesignCanvas(
     canvas.on("selection:cleared", emitSelection);
 
     const emitImageTransform = () => {
-      if (!onChangeTransform || !imageRef.current) return;
+      if (!onChangeTransformRef.current || !imageRef.current) return;
       const img = imageRef.current;
-      onChangeTransform({
+      onChangeTransformRef.current({
         x: img.left,
         y: img.top,
         scaleX: img.scaleX,
@@ -345,7 +362,7 @@ const DesignCanvas = forwardRef(function DesignCanvas(
       imageRef.current = null;
       shirtRef.current = null;
     };
-  }, [onChangeTransform, onSelectionChange, printArea.h, printArea.w, printArea.x, printArea.y, shirtBox, shirtColor]);
+  }, [printArea.h, printArea.w, printArea.x, printArea.y, shirtBox]);
 
   useEffect(() => {
     if (shirtRef.current) {
@@ -355,18 +372,19 @@ const DesignCanvas = forwardRef(function DesignCanvas(
   }, [shirtColor]);
 
   useEffect(() => {
-    const canvas = fabricRef.current;
     if (!canvasReady) return;
-    if (!canvas) return;
+    if (!fabricRef.current) return;
 
     if (!imageSrc) {
-      if (imageRef.current) {
-        canvas.remove(imageRef.current);
+      if (imageRef.current && fabricRef.current) {
+        fabricRef.current.remove(imageRef.current);
         imageRef.current = null;
-        canvas.requestRenderAll();
+        fabricRef.current.requestRenderAll();
       }
       return;
     }
+
+    let cancelled = false;
 
     const isBlobUrl = imageSrc.startsWith("blob:");
     const isDataUrl = imageSrc.startsWith("data:");
@@ -374,6 +392,9 @@ const DesignCanvas = forwardRef(function DesignCanvas(
 
     Image.fromURL(imageSrc, loadOptions)
       .then((img) => {
+        if (cancelled) return;
+        // Always use the latest canvas reference in case it was recreated
+        const canvas = fabricRef.current;
         if (!canvas) return;
 
         if (imageRef.current) {
@@ -404,6 +425,8 @@ const DesignCanvas = forwardRef(function DesignCanvas(
       .catch((err) => {
         console.error("Image load error:", err);
       });
+
+    return () => { cancelled = true; };
   }, [imageSrc, printArea.h, printArea.w, printArea.x, printArea.y, canvasReady]);
 
   return (
