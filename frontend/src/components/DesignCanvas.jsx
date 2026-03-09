@@ -1,122 +1,410 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Rect, Image as KonvaImage, Transformer, Group } from "react-konva";
-import TShirtMockup, { getDefaultPrintArea } from "./TShirtMockup";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Canvas, Group, IText, Image, Path, Rect } from "fabric";
 
-// load HTML image object from src (ObjectURL/base64/http...)
-function useHtmlImage(src) {
-  const [image, setImage] = useState(null);
+export const FONT_OPTIONS = [
+  "Poppins",
+  "Roboto",
+  "Montserrat",
+  "Oswald",
+  "Playfair Display",
+  "Merriweather",
+  "Bebas Neue",
+  "Lobster",
+  "Pacifico",
+  "Lora",
+  "Raleway",
+  "Nunito",
+  "Abril Fatface",
+  "Anton",
+  "Josefin Sans",
+  "Orbitron",
+  "Quicksand",
+  "Source Sans 3",
+  "Rubik",
+  "Arial",
+  "Helvetica",
+  "Verdana",
+  "Tahoma",
+  "Trebuchet MS",
+  "Georgia",
+  "Times New Roman",
+  "Courier New",
+  "Impact",
+  "Comic Sans MS",
+];
 
-  useEffect(() => {
-    if (!src) {
-      setImage(null);
-      return;
-    }
-    const img = new window.Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => setImage(img);
-    img.onerror = (e) => console.log("image load error", e);
-    img.src = src;
-  }, [src]);
-
-  return image;
+function getDefaultPrintArea(box) {
+  const w = box.w * 0.46;
+  const h = box.h * 0.56;
+  return {
+    x: box.x + (box.w - w) / 2,
+    y: box.y + box.h * 0.22,
+    w,
+    h,
+  };
 }
 
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
+function buildShirtGroup(box, color) {
+  const shirtPath = `
+    M 22 10
+    C 18 10, 14 12, 11 16
+    L 4 28
+    C 3 30, 4 33, 7 34
+    L 18 38
+    L 18 108
+    C 18 114, 22 118, 28 118
+    L 72 118
+    C 78 118, 82 114, 82 108
+    L 82 38
+    L 93 34
+    C 96 33, 97 30, 96 28
+    L 89 16
+    C 86 12, 82 10, 78 10
+    C 72 10, 66 12, 60 16
+    C 56 19, 44 19, 40 16
+    C 34 12, 28 10, 22 10
+    Z
+  `;
 
-export default function DesignCanvas({ imageSrc, onChangeTransform }) {
-  const stageWidth = 420;
-  const stageHeight = 520;
+  const neckPath = `
+    M 38 12
+    C 40 26, 60 26, 62 12
+    C 56 8, 44 8, 38 12
+    Z
+  `;
 
-  // shirt position on the stage
-  const shirtBox = useMemo(
-    () => ({
-      x: 40,
-      y: 20,
-      w: 340,
-      h: 480,
-    }),
-    []
-  );
+  const baseW = 100;
+  const baseH = 120;
+  const scaleX = box.w / baseW;
+  const scaleY = box.h / baseH;
 
-  // print area is a vertical rectangle inside the shirt
-  const printArea = useMemo(() => getDefaultPrintArea(shirtBox), [shirtBox]);
-
-  const img = useHtmlImage(imageSrc);
-
-  const imageRef = useRef(null);
-  const trRef = useRef(null);
-
-  // keep overlay in STAGE coordinates (simple & stable)
-  const [transform, setTransform] = useState({
-    x: printArea.x + printArea.w / 2,
-    y: printArea.y + printArea.h / 2,
-    scaleX: 1,
-    scaleY: 1,
-    rotation: 0,
+  const shirt = new Path(shirtPath, {
+    fill: color,
+    stroke: "#e5e7eb",
+    strokeWidth: 1.4,
+    strokeLineJoin: "round",
+    originX: "left",
+    originY: "top",
+    selectable: false,
+    evented: false,
   });
 
-  // reset when new image loaded — auto-scale to fit within print area
+  // Align shirt paths so their bounding box starts at (0, 0).
+  shirt.setCoords();
+  const shirtBounds = shirt.getBoundingRect(true, true);
+  const offsetX = -shirtBounds.left;
+  const offsetY = -shirtBounds.top;
+  shirt.set({ left: offsetX, top: offsetY });
+
+  const shadow = new Path(shirtPath, {
+    left: offsetX + 1.2,
+    top: offsetY + 1.2,
+    fill: "#000",
+    opacity: 0.1,
+    originX: "left",
+    originY: "top",
+    selectable: false,
+    evented: false,
+  });
+
+  const neckFill = new Path(neckPath, {
+    left: offsetX,
+    top: offsetY,
+    fill: "#f9fafb",
+    opacity: 0.95,
+    originX: "left",
+    originY: "top",
+    selectable: false,
+    evented: false,
+  });
+
+  const neckStroke = new Path(neckPath, {
+    left: offsetX,
+    top: offsetY,
+    fill: "",
+    stroke: "#e5e7eb",
+    strokeWidth: 1.2,
+    opacity: 0.9,
+    strokeLineJoin: "round",
+    originX: "left",
+    originY: "top",
+    selectable: false,
+    evented: false,
+  });
+
+  const group = new Group([shadow, shirt, neckFill, neckStroke], {
+    left: box.x,
+    top: box.y,
+    scaleX,
+    scaleY,
+    originX: "left",
+    originY: "top",
+    selectable: false,
+    evented: false,
+  });
+
+  return { group, shirt };
+}
+
+function applyCommonControls(obj) {
+  obj.set({
+    cornerStyle: "circle",
+    cornerColor: "#2563eb",
+    borderColor: "#2563eb",
+    transparentCorners: false,
+    padding: 6,
+  });
+}
+
+const DesignCanvas = forwardRef(function DesignCanvas(
+  { imageSrc, onChangeTransform, onSelectionChange, shirtColor = "#111827" },
+  ref
+) {
+  const stageWidth = 420;
+  const stageHeight = 520;
+  const shirtWidth = 340;
+  const shirtHeight = 480;
+
+  const shirtBox = useMemo(
+    () => ({
+      x: (stageWidth - shirtWidth) / 2,
+      y: 20,
+      w: shirtWidth,
+      h: shirtHeight,
+    }),
+    [stageWidth]
+  );
+
+  const printArea = useMemo(() => getDefaultPrintArea(shirtBox), [shirtBox]);
+
+  const canvasElRef = useRef(null);
+  const fabricRef = useRef(null);
+  const imageRef = useRef(null);
+  const clipRef = useRef(null);
+  const printGuideRef = useRef(null);
+  const shirtRef = useRef(null);
+  const [canvasReady, setCanvasReady] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    addText({ text, fontFamily, fontSize, fill }) {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+
+      const textObj = new IText(text || "Text", {
+        left: printArea.x + printArea.w / 2,
+        top: printArea.y + printArea.h / 2,
+        originX: "center",
+        originY: "center",
+        fontFamily,
+        fontSize,
+        fill,
+        editable: true,
+        clipPath: clipRef.current || null,
+      });
+
+      applyCommonControls(textObj);
+
+      canvas.add(textObj);
+      canvas.setActiveObject(textObj);
+      canvas.requestRenderAll();
+    },
+    deleteSelected() {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const active = canvas.getActiveObject();
+      if (!active) return;
+      canvas.remove(active);
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+    },
+    bringForward() {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const active = canvas.getActiveObject();
+      if (!active) return;
+      canvas.bringForward(active);
+      canvas.requestRenderAll();
+    },
+    sendBack() {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const active = canvas.getActiveObject();
+      if (!active) return;
+      canvas.sendBackwards(active);
+      canvas.requestRenderAll();
+    },
+    setActiveTextStyle({ fontFamily, fontSize, fill }) {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const active = canvas.getActiveObject();
+      if (!active) return;
+      if (active.type === "i-text" || active.type === "textbox" || active.type === "text") {
+        active.set({
+          fontFamily: fontFamily ?? active.fontFamily,
+          fontSize: Number.isFinite(fontSize) ? fontSize : active.fontSize,
+          fill: fill ?? active.fill,
+        });
+        canvas.requestRenderAll();
+      }
+    },
+  }));
+
   useEffect(() => {
-    if (!img) return;
-    // scale to fit the print area while maintaining aspect ratio
-    const fitScale =
-      img.width > 0 && img.height > 0
-        ? Math.min(printArea.w / img.width, printArea.h / img.height)
-        : 1;
-    setTransform({
-      x: printArea.x + printArea.w / 2,
-      y: printArea.y + printArea.h / 2,
-      scaleX: fitScale,
-      scaleY: fitScale,
-      rotation: 0,
+    if (!canvasElRef.current) return;
+
+    const canvas = new Canvas(canvasElRef.current, {
+      width: stageWidth,
+      height: stageHeight,
+      backgroundColor: "#ffffff",
+      preserveObjectStacking: true,
+      selection: true,
     });
-  }, [img, printArea.x, printArea.y, printArea.w, printArea.h]);
 
-  // attach transformer
+    fabricRef.current = canvas;
+    setCanvasReady(true);
+
+    const { group: shirtGroup, shirt } = buildShirtGroup(shirtBox, shirtColor);
+    shirtRef.current = shirt;
+    canvas.add(shirtGroup);
+
+    const printGuide = new Rect({
+      left: printArea.x,
+      top: printArea.y,
+      width: printArea.w,
+      height: printArea.h,
+      fill: "",
+      stroke: "#60a5fa",
+      strokeWidth: 1.2,
+      strokeDashArray: [8, 6],
+      rx: 10,
+      ry: 10,
+      selectable: false,
+      evented: false,
+    });
+
+    printGuideRef.current = printGuide;
+    canvas.add(printGuide);
+
+    const clipRect = new Rect({
+      left: printArea.x,
+      top: printArea.y,
+      width: printArea.w,
+      height: printArea.h,
+      absolutePositioned: true,
+    });
+
+    clipRef.current = clipRect;
+
+    const emitSelection = () => {
+      const active = canvas.getActiveObject();
+      if (!onSelectionChange) return;
+      if (!active) {
+        onSelectionChange({ type: "none" });
+        return;
+      }
+      if (active.type === "i-text" || active.type === "textbox" || active.type === "text") {
+        onSelectionChange({
+          type: "text",
+          fontFamily: active.fontFamily || "Poppins",
+          fontSize: Math.round(active.fontSize || 36),
+          fill: active.fill || "#111827",
+        });
+        return;
+      }
+      if (active.type === "image") {
+        onSelectionChange({ type: "image" });
+        return;
+      }
+      onSelectionChange({ type: "other" });
+    };
+
+    canvas.on("selection:created", emitSelection);
+    canvas.on("selection:updated", emitSelection);
+    canvas.on("selection:cleared", emitSelection);
+
+    const emitImageTransform = () => {
+      if (!onChangeTransform || !imageRef.current) return;
+      const img = imageRef.current;
+      onChangeTransform({
+        x: img.left,
+        y: img.top,
+        scaleX: img.scaleX,
+        scaleY: img.scaleY,
+        rotation: img.angle || 0,
+      });
+    };
+
+    canvas.on("object:modified", emitImageTransform);
+    canvas.on("object:moving", emitImageTransform);
+    canvas.on("object:scaling", emitImageTransform);
+    canvas.on("object:rotating", emitImageTransform);
+
+    return () => {
+      canvas.dispose();
+      fabricRef.current = null;
+      imageRef.current = null;
+      shirtRef.current = null;
+    };
+  }, [onChangeTransform, onSelectionChange, printArea.h, printArea.w, printArea.x, printArea.y, shirtBox, shirtColor]);
+
   useEffect(() => {
-    if (!img) return;
-    if (!trRef.current || !imageRef.current) return;
+    if (shirtRef.current) {
+      shirtRef.current.set({ fill: shirtColor });
+      fabricRef.current?.requestRenderAll();
+    }
+  }, [shirtColor]);
 
-    trRef.current.nodes([imageRef.current]);
-    trRef.current.getLayer()?.batchDraw();
-  }, [img]);
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvasReady) return;
+    if (!canvas) return;
 
-  function emit(t) {
-    setTransform(t);
-    onChangeTransform?.(t);
-  }
+    if (!imageSrc) {
+      if (imageRef.current) {
+        canvas.remove(imageRef.current);
+        imageRef.current = null;
+        canvas.requestRenderAll();
+      }
+      return;
+    }
 
-  function clampToPrintArea(next) {
-    if (!img) return next;
+    const isBlobUrl = imageSrc.startsWith("blob:");
+    const isDataUrl = imageSrc.startsWith("data:");
+    const loadOptions = isBlobUrl || isDataUrl ? undefined : { crossOrigin: "anonymous" };
 
-    // rendered size ignoring rotation
-    const renderedW = img.width * next.scaleX;
-    const renderedH = img.height * next.scaleY;
+    Image.fromURL(imageSrc, loadOptions)
+      .then((img) => {
+        if (!canvas) return;
 
-    // because we use offset center
-    const halfW = renderedW / 2;
-    const halfH = renderedH / 2;
+        if (imageRef.current) {
+          canvas.remove(imageRef.current);
+        }
 
-    const minX = printArea.x + halfW;
-    const maxX = printArea.x + printArea.w - halfW;
-    const minY = printArea.y + halfH;
-    const maxY = printArea.y + printArea.h - halfH;
+        const scale = Math.min(printArea.w / img.width, printArea.h / img.height);
+        img.set({
+          left: printArea.x + printArea.w / 2,
+          top: printArea.y + printArea.h / 2,
+          originX: "center",
+          originY: "center",
+          scaleX: scale,
+          scaleY: scale,
+          angle: 0,
+          selectable: true,
+          hasControls: true,
+          clipPath: clipRef.current || null,
+        });
 
-    const x =
-      minX <= maxX ? clamp(next.x, minX, maxX) : printArea.x + printArea.w / 2;
-    const y =
-      minY <= maxY ? clamp(next.y, minY, maxY) : printArea.y + printArea.h / 2;
+        applyCommonControls(img);
 
-    return { ...next, x, y };
-  }
-
-  function selectImage() {
-    if (!trRef.current || !imageRef.current) return;
-    trRef.current.nodes([imageRef.current]);
-    trRef.current.getLayer()?.batchDraw();
-  }
+        imageRef.current = img;
+        canvas.add(img);
+        canvas.setActiveObject(img);
+        canvas.requestRenderAll();
+      })
+      .catch((err) => {
+        console.error("Image load error:", err);
+      });
+  }, [imageSrc, printArea.h, printArea.w, printArea.x, printArea.y, canvasReady]);
 
   return (
     <div
@@ -128,112 +416,9 @@ export default function DesignCanvas({ imageSrc, onChangeTransform }) {
         background: "#fafafa",
       }}
     >
-      <Stage
-        width={stageWidth}
-        height={stageHeight}
-        onMouseDown={(e) => {
-          // click outside image => deselect
-          const clickedOnEmpty = e.target === e.target.getStage();
-          if (clickedOnEmpty && trRef.current) {
-            trRef.current.nodes([]);
-            trRef.current.getLayer()?.batchDraw();
-          }
-        }}
-      >
-        <Layer>
-          {/* background "paper" */}
-          <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
-
-          {/* shirt vector + print area outline */}
-          <TShirtMockup box={shirtBox} color="#111827" showPrintArea />
-
-          {/* clip overlay inside print area */}
-          <Group
-            clipX={printArea.x}
-            clipY={printArea.y}
-            clipWidth={printArea.w}
-            clipHeight={printArea.h}
-          >
-            {img && (
-              <KonvaImage
-                ref={imageRef}
-                image={img}
-                x={transform.x}
-                y={transform.y}
-                rotation={transform.rotation}
-                scaleX={transform.scaleX}
-                scaleY={transform.scaleY}
-                offsetX={img.width / 2}
-                offsetY={img.height / 2}
-                draggable
-                onClick={selectImage}
-                onTap={selectImage}
-                onDragMove={(e) => {
-                  const node = e.target;
-                  const next = clampToPrintArea({
-                    ...transform,
-                    x: node.x(),
-                    y: node.y(),
-                  });
-                  node.x(next.x);
-                  node.y(next.y);
-                  emit(next);
-                }}
-                onDragEnd={(e) => {
-                  const node = e.target;
-                  const next = clampToPrintArea({
-                    ...transform,
-                    x: node.x(),
-                    y: node.y(),
-                  });
-                  node.x(next.x);
-                  node.y(next.y);
-                  emit(next);
-                }}
-                onTransformEnd={() => {
-                  const node = imageRef.current;
-                  if (!node) return;
-
-                  const nextScaleX = Math.max(0.1, node.scaleX());
-                  const nextScaleY = Math.max(0.1, node.scaleY());
-
-                  const next = clampToPrintArea({
-                    x: node.x(),
-                    y: node.y(),
-                    rotation: node.rotation(),
-                    scaleX: nextScaleX,
-                    scaleY: nextScaleY,
-                  });
-
-                  node.scaleX(next.scaleX);
-                  node.scaleY(next.scaleY);
-                  node.rotation(next.rotation);
-                  node.x(next.x);
-                  node.y(next.y);
-                  emit(next);
-                }}
-              />
-            )}
-          </Group>
-
-          {/* transformer OUTSIDE clip group => handles always visible & resizable */}
-          {img && (
-            <Transformer
-              ref={trRef}
-              rotateEnabled
-              enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right"]}
-              keepRatio={false}
-              borderStroke="#2563eb"
-              borderStrokeWidth={2}
-              anchorFill="#ffffff"
-              anchorStroke="#2563eb"
-              anchorStrokeWidth={2}
-              anchorSize={10}
-              rotateAnchorOffset={20}
-            />
-          )}
-        </Layer>
-      </Stage>
+      <canvas ref={canvasElRef} width={stageWidth} height={stageHeight} />
     </div>
   );
-}
+});
+
+export default DesignCanvas;
