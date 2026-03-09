@@ -57,14 +57,19 @@ export default function DesignCanvas({ imageSrc, onChangeTransform }) {
     rotation: 0,
   });
 
-  // reset when new image loaded
+  // reset when new image loaded — auto-scale to fit within print area
   useEffect(() => {
     if (!img) return;
+    // scale to fit the print area while maintaining aspect ratio
+    const fitScale =
+      img.width > 0 && img.height > 0
+        ? Math.min(printArea.w / img.width, printArea.h / img.height)
+        : 1;
     setTransform({
       x: printArea.x + printArea.w / 2,
       y: printArea.y + printArea.h / 2,
-      scaleX: 1,
-      scaleY: 1,
+      scaleX: fitScale,
+      scaleY: fitScale,
       rotation: 0,
     });
   }, [img, printArea.x, printArea.y, printArea.w, printArea.h]);
@@ -200,6 +205,9 @@ export default function DesignCanvas({ imageSrc, onChangeTransform }) {
                     scaleY: nextScaleY,
                   });
 
+                  node.scaleX(next.scaleX);
+                  node.scaleY(next.scaleY);
+                  node.rotation(next.rotation);
                   node.x(next.x);
                   node.y(next.y);
                   emit(next);
@@ -214,8 +222,14 @@ export default function DesignCanvas({ imageSrc, onChangeTransform }) {
               ref={trRef}
               rotateEnabled
               enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right"]}
-              // optional: keep ratio when resizing (often nicer for photos)
               keepRatio={false}
+              borderStroke="#2563eb"
+              borderStrokeWidth={2}
+              anchorFill="#ffffff"
+              anchorStroke="#2563eb"
+              anchorStrokeWidth={2}
+              anchorSize={10}
+              rotateAnchorOffset={20}
             />
           )}
         </Layer>
