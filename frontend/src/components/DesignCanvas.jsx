@@ -1,104 +1,80 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Canvas, Group, IText, Image, Path, Rect } from "fabric";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Canvas, Group, Image, Path } from "fabric";
 
-export const FONT_OPTIONS = [
-  "Poppins",
-  "Roboto",
-  "Montserrat",
-  "Oswald",
-  "Playfair Display",
-  "Merriweather",
-  "Bebas Neue",
-  "Lobster",
-  "Pacifico",
-  "Lora",
-  "Raleway",
-  "Nunito",
-  "Abril Fatface",
-  "Anton",
-  "Josefin Sans",
-  "Orbitron",
-  "Quicksand",
-  "Source Sans 3",
-  "Rubik",
-  "Arial",
-  "Helvetica",
-  "Verdana",
-  "Tahoma",
-  "Trebuchet MS",
-  "Georgia",
-  "Times New Roman",
-  "Courier New",
-  "Impact",
-  "Comic Sans MS",
-];
+// ---- Shared geometry ----
 
-function getDefaultPrintArea(box) {
-  const w = box.w * 0.46;
-  const h = box.h * 0.56;
-  return {
-    x: box.x + (box.w - w) / 2,
-    y: box.y + box.h * 0.22,
-    w,
-    h,
-  };
+// Normalized 100x120
+const SHIRT_PATH = `
+  M 22 10
+  C 18 10, 14 12, 11 16
+  L 4 28
+  C 3 30, 4 33, 7 34
+  L 18 38
+  L 18 108
+  C 18 114, 22 118, 28 118
+  L 72 118
+  C 78 118, 82 114, 82 108
+  L 82 38
+  L 93 34
+  C 96 33, 97 30, 96 28
+  L 89 16
+  C 86 12, 82 10, 78 10
+  C 72 10, 66 12, 60 16
+  C 56 19, 44 19, 40 16
+  C 34 12, 28 10, 22 10
+  Z
+`;
+
+function applyCommonControls(obj) {
+  if (!obj || typeof obj.set !== "function") return;
+  obj.set({
+    cornerStyle: "circle",
+    cornerColor: "#2563eb",
+    borderColor: "#2563eb",
+    transparentCorners: false,
+    padding: 6,
+  });
 }
 
-function buildShirtGroup(box, color) {
-  const shirtPath = `
-    M 22 10
-    C 18 10, 14 12, 11 16
-    L 4 28
-    C 3 30, 4 33, 7 34
-    L 18 38
-    L 18 108
-    C 18 114, 22 118, 28 118
-    L 72 118
-    C 78 118, 82 114, 82 108
-    L 82 38
-    L 93 34
-    C 96 33, 97 30, 96 28
-    L 89 16
-    C 86 12, 82 10, 78 10
-    C 72 10, 66 12, 60 16
-    C 56 19, 44 19, 40 16
-    C 34 12, 28 10, 22 10
-    Z
-  `;
+function isEditableObject(obj) {
+  if (!obj) return false;
+  const t = obj.type;
+  return t === "image";
+}
 
-  const neckPath = `
-    M 38 12
-    C 40 26, 60 26, 62 12
-    C 56 8, 44 8, 38 12
-    Z
-  `;
-
+/**
+ * Build:
+ * - shirtUnder (shadow + fill)
+ * - shirtOver (stroke + neck)
+ * - shirtFill ref for color updates
+ * - shirtClipPath for masking designs to the shirt shape (stage coords)
+ */
+function buildShirtLayers(box, color) {
   const baseW = 100;
   const baseH = 120;
   const scaleX = box.w / baseW;
   const scaleY = box.h / baseH;
 
-  const shirt = new Path(shirtPath, {
+  const shirtFill = new Path(SHIRT_PATH, {
+    left: 0,
+    top: 0,
     fill: color,
-    stroke: "#e5e7eb",
-    strokeWidth: 1.4,
-    strokeLineJoin: "round",
     originX: "left",
     originY: "top",
     selectable: false,
     evented: false,
   });
 
-  // Align shirt paths so their bounding box starts at (0, 0).
-  shirt.setCoords();
-  const shirtBounds = shirt.getBoundingRect(true, true);
-  const offsetX = -shirtBounds.left;
-  const offsetY = -shirtBounds.top;
-  shirt.set({ left: offsetX, top: offsetY });
-
-  const shadow = new Path(shirtPath, {
-    left: offsetX + 1.2,
-    top: offsetY + 1.2,
+  const shadow = new Path(SHIRT_PATH, {
+    left: 1.2,
+    top: 1.2,
     fill: "#000",
     opacity: 0.1,
     originX: "left",
@@ -107,32 +83,22 @@ function buildShirtGroup(box, color) {
     evented: false,
   });
 
-  const neckFill = new Path(neckPath, {
-    left: offsetX,
-    top: offsetY,
-    fill: "#f9fafb",
-    opacity: 0.95,
-    originX: "left",
-    originY: "top",
-    selectable: false,
-    evented: false,
-  });
-
-  const neckStroke = new Path(neckPath, {
-    left: offsetX,
-    top: offsetY,
+  const shirtStroke = new Path(SHIRT_PATH, {
+    left: 0,
+    top: 0,
     fill: "",
     stroke: "#e5e7eb",
-    strokeWidth: 1.2,
-    opacity: 0.9,
+    strokeWidth: 1.4,
     strokeLineJoin: "round",
+    opacity: 1,
     originX: "left",
     originY: "top",
     selectable: false,
     evented: false,
   });
 
-  const group = new Group([shadow, shirt, neckFill, neckStroke], {
+
+  const commonGroupProps = {
     left: box.x,
     top: box.y,
     scaleX,
@@ -141,19 +107,31 @@ function buildShirtGroup(box, color) {
     originY: "top",
     selectable: false,
     evented: false,
+  };
+
+  const shirtUnder = new Group([shadow, shirtFill], commonGroupProps);
+  const shirtOver = new Group([shirtStroke], commonGroupProps);
+
+  // Clip path in STAGE coords (absolutePositioned)
+  const shirtClipPath = new Path(SHIRT_PATH, {
+    left: box.x,
+    top: box.y,
+    scaleX,
+    scaleY,
+    originX: "left",
+    originY: "top",
+    absolutePositioned: true,
   });
 
-  return { group, shirt };
+  return { shirtUnder, shirtOver, shirtFill, shirtClipPath };
 }
 
-function applyCommonControls(obj) {
-  obj.set({
-    cornerStyle: "circle",
-    cornerColor: "#2563eb",
-    borderColor: "#2563eb",
-    transparentCorners: false,
-    padding: 6,
-  });
+function restack(canvas, { shirtOver }) {
+  if (!canvas) return;
+  if (shirtOver && typeof canvas.bringObjectToFront === "function") {
+    canvas.bringObjectToFront(shirtOver);
+  }
+  canvas.requestRenderAll();
 }
 
 const DesignCanvas = forwardRef(function DesignCanvas(
@@ -172,83 +150,71 @@ const DesignCanvas = forwardRef(function DesignCanvas(
       w: shirtWidth,
       h: shirtHeight,
     }),
-    [stageWidth]
+    [stageWidth, shirtWidth, shirtHeight]
   );
-
-  const printArea = useMemo(() => getDefaultPrintArea(shirtBox), [shirtBox]);
 
   const canvasElRef = useRef(null);
   const fabricRef = useRef(null);
+
   const imageRef = useRef(null);
-  const clipRef = useRef(null);
-  const printGuideRef = useRef(null);
-  const shirtRef = useRef(null);
+  const shirtFillRef = useRef(null);
+  const shirtOverRef = useRef(null);
+  const shirtClipPathRef = useRef(null);
+
+  // keep latest callbacks without re-initting canvas
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const onChangeTransformRef = useRef(onChangeTransform);
+  useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
+  useEffect(() => {
+    onChangeTransformRef.current = onChangeTransform;
+  }, [onChangeTransform]);
+
   const [canvasReady, setCanvasReady] = useState(false);
 
   useImperativeHandle(ref, () => ({
-    addText({ text, fontFamily, fontSize, fill }) {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-
-      const textObj = new IText(text || "Text", {
-        left: printArea.x + printArea.w / 2,
-        top: printArea.y + printArea.h / 2,
-        originX: "center",
-        originY: "center",
-        fontFamily,
-        fontSize,
-        fill,
-        editable: true,
-        clipPath: clipRef.current || null,
-      });
-
-      applyCommonControls(textObj);
-
-      canvas.add(textObj);
-      canvas.setActiveObject(textObj);
-      canvas.requestRenderAll();
-    },
     deleteSelected() {
       const canvas = fabricRef.current;
       if (!canvas) return;
+
       const active = canvas.getActiveObject();
       if (!active) return;
+      if (!isEditableObject(active)) return;
+
       canvas.remove(active);
       canvas.discardActiveObject();
-      canvas.requestRenderAll();
+      restack(canvas, { shirtOver: shirtOverRef.current });
     },
+
     bringForward() {
       const canvas = fabricRef.current;
       if (!canvas) return;
+
       const active = canvas.getActiveObject();
-      if (!active) return;
-      canvas.bringForward(active);
-      canvas.requestRenderAll();
+      if (!active || !isEditableObject(active)) return;
+
+      if (typeof canvas.bringObjectForward === "function") {
+        canvas.bringObjectForward(active);
+      }
+      restack(canvas, { shirtOver: shirtOverRef.current });
     },
+
     sendBack() {
       const canvas = fabricRef.current;
       if (!canvas) return;
+
       const active = canvas.getActiveObject();
-      if (!active) return;
-      canvas.sendBackwards(active);
-      canvas.requestRenderAll();
-    },
-    setActiveTextStyle({ fontFamily, fontSize, fill }) {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const active = canvas.getActiveObject();
-      if (!active) return;
-      if (active.type === "i-text" || active.type === "textbox" || active.type === "text") {
-        active.set({
-          fontFamily: fontFamily ?? active.fontFamily,
-          fontSize: Number.isFinite(fontSize) ? fontSize : active.fontSize,
-          fill: fill ?? active.fill,
-        });
-        canvas.requestRenderAll();
+      if (!active || !isEditableObject(active)) return;
+
+      if (typeof canvas.sendObjectBackwards === "function") {
+        canvas.sendObjectBackwards(active);
       }
+      restack(canvas, { shirtOver: shirtOverRef.current });
     },
   }));
 
+  // INIT canvas only once
   useEffect(() => {
     if (!canvasElRef.current) return;
 
@@ -263,69 +229,34 @@ const DesignCanvas = forwardRef(function DesignCanvas(
     fabricRef.current = canvas;
     setCanvasReady(true);
 
-    const { group: shirtGroup, shirt } = buildShirtGroup(shirtBox, shirtColor);
-    shirtRef.current = shirt;
-    canvas.add(shirtGroup);
+    // shirt layers + shirt clipPath (mask)
+    const { shirtUnder, shirtOver, shirtFill, shirtClipPath } = buildShirtLayers(
+      shirtBox,
+      shirtColor
+    );
+    shirtFillRef.current = shirtFill;
+    shirtOverRef.current = shirtOver;
+    shirtClipPathRef.current = shirtClipPath;
 
-    const printGuide = new Rect({
-      left: printArea.x,
-      top: printArea.y,
-      width: printArea.w,
-      height: printArea.h,
-      fill: "",
-      stroke: "#60a5fa",
-      strokeWidth: 1.2,
-      strokeDashArray: [8, 6],
-      rx: 10,
-      ry: 10,
-      selectable: false,
-      evented: false,
-    });
-
-    printGuideRef.current = printGuide;
-    canvas.add(printGuide);
-
-    const clipRect = new Rect({
-      left: printArea.x,
-      top: printArea.y,
-      width: printArea.w,
-      height: printArea.h,
-      absolutePositioned: true,
-    });
-
-    clipRef.current = clipRect;
+    // Layer order: under -> design image(s) -> over
+    canvas.add(shirtUnder);
+    canvas.add(shirtOver);
 
     const emitSelection = () => {
       const active = canvas.getActiveObject();
-      if (!onSelectionChange) return;
-      if (!active) {
-        onSelectionChange({ type: "none" });
-        return;
-      }
-      if (active.type === "i-text" || active.type === "textbox" || active.type === "text") {
-        onSelectionChange({
-          type: "text",
-          fontFamily: active.fontFamily || "Poppins",
-          fontSize: Math.round(active.fontSize || 36),
-          fill: active.fill || "#111827",
-        });
-        return;
-      }
-      if (active.type === "image") {
-        onSelectionChange({ type: "image" });
-        return;
-      }
-      onSelectionChange({ type: "other" });
+      const cb = onSelectionChangeRef.current;
+      if (!cb) return;
+
+      if (!active) return cb({ type: "none" });
+      if (active.type === "image") return cb({ type: "image" });
+      return cb({ type: "other" });
     };
 
-    canvas.on("selection:created", emitSelection);
-    canvas.on("selection:updated", emitSelection);
-    canvas.on("selection:cleared", emitSelection);
-
     const emitImageTransform = () => {
-      if (!onChangeTransform || !imageRef.current) return;
+      const cb = onChangeTransformRef.current;
+      if (!cb || !imageRef.current) return;
       const img = imageRef.current;
-      onChangeTransform({
+      cb({
         x: img.left,
         y: img.top,
         scaleX: img.scaleX,
@@ -333,6 +264,10 @@ const DesignCanvas = forwardRef(function DesignCanvas(
         rotation: img.angle || 0,
       });
     };
+
+    canvas.on("selection:created", emitSelection);
+    canvas.on("selection:updated", emitSelection);
+    canvas.on("selection:cleared", emitSelection);
 
     canvas.on("object:modified", emitImageTransform);
     canvas.on("object:moving", emitImageTransform);
@@ -343,68 +278,86 @@ const DesignCanvas = forwardRef(function DesignCanvas(
       canvas.dispose();
       fabricRef.current = null;
       imageRef.current = null;
-      shirtRef.current = null;
+      shirtFillRef.current = null;
+      shirtOverRef.current = null;
+      shirtClipPathRef.current = null;
     };
-  }, [onChangeTransform, onSelectionChange, printArea.h, printArea.w, printArea.x, printArea.y, shirtBox, shirtColor]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // update shirt color
   useEffect(() => {
-    if (shirtRef.current) {
-      shirtRef.current.set({ fill: shirtColor });
+    if (shirtFillRef.current && typeof shirtFillRef.current.set === "function") {
+      shirtFillRef.current.set({ fill: shirtColor });
       fabricRef.current?.requestRenderAll();
     }
   }, [shirtColor]);
 
+  // load/replace image (race-safe)
+  const loadReqIdRef = useRef(0);
   useEffect(() => {
     const canvas = fabricRef.current;
-    if (!canvasReady) return;
-    if (!canvas) return;
+    if (!canvasReady || !canvas) return;
+
+    loadReqIdRef.current += 1;
+    const reqId = loadReqIdRef.current;
 
     if (!imageSrc) {
       if (imageRef.current) {
         canvas.remove(imageRef.current);
         imageRef.current = null;
-        canvas.requestRenderAll();
+        restack(canvas, { shirtOver: shirtOverRef.current });
       }
       return;
     }
 
     const isBlobUrl = imageSrc.startsWith("blob:");
     const isDataUrl = imageSrc.startsWith("data:");
-    const loadOptions = isBlobUrl || isDataUrl ? undefined : { crossOrigin: "anonymous" };
+    const loadOptions =
+      isBlobUrl || isDataUrl ? undefined : { crossOrigin: "anonymous" };
 
     Image.fromURL(imageSrc, loadOptions)
       .then((img) => {
-        if (!canvas) return;
+        if (reqId !== loadReqIdRef.current) return;
+        const canvasNow = fabricRef.current;
+        const shirtClipPath = shirtClipPathRef.current;
+        if (!canvasNow || !shirtClipPath) return;
 
         if (imageRef.current) {
-          canvas.remove(imageRef.current);
+          canvasNow.remove(imageRef.current);
         }
 
-        const scale = Math.min(printArea.w / img.width, printArea.h / img.height);
+        if (!img.width || !img.height) return;
+        const initTargetW = shirtBox.w * 0.34;
+        const initTargetH = shirtBox.h * 0.34;
+        const scale = Math.min(initTargetW / img.width, initTargetH / img.height);
+
         img.set({
-          left: printArea.x + printArea.w / 2,
-          top: printArea.y + printArea.h / 2,
+          left: shirtBox.x + shirtBox.w / 2,
+          top: shirtBox.y + shirtBox.h * 0.56,
           originX: "center",
           originY: "center",
           scaleX: scale,
           scaleY: scale,
           angle: 0,
           selectable: true,
+          evented: true,
           hasControls: true,
-          clipPath: clipRef.current || null,
+          clipPath: shirtClipPath,
         });
 
         applyCommonControls(img);
 
         imageRef.current = img;
-        canvas.add(img);
-        canvas.setActiveObject(img);
-        canvas.requestRenderAll();
+        canvasNow.add(img);
+        canvasNow.setActiveObject(img);
+
+        restack(canvasNow, { shirtOver: shirtOverRef.current });
       })
       .catch((err) => {
         console.error("Image load error:", err);
       });
-  }, [imageSrc, printArea.h, printArea.w, printArea.x, printArea.y, canvasReady]);
+  }, [imageSrc, canvasReady]);
 
   return (
     <div
