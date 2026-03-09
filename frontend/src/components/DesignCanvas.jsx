@@ -194,8 +194,9 @@ const DesignCanvas = forwardRef(function DesignCanvas(
   const onChangeTransformRef = useRef(onChangeTransform);
   const [canvasReady, setCanvasReady] = useState(false);
 
-  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; });
-  useEffect(() => { onChangeTransformRef.current = onChangeTransform; });
+  // Update callback refs on every render to stay in sync with the latest props.
+  onSelectionChangeRef.current = onSelectionChange;
+  onChangeTransformRef.current = onChangeTransform;
 
   useImperativeHandle(ref, () => ({
     addText({ text, fontFamily, fontSize, fill }) {
